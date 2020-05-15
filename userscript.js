@@ -404,11 +404,22 @@ class TrelloAPI {
                 trelloAPI
                     .getCard(activity.cardId)
                     .then((foundCard) => {
-                        cardsCache.push(foundCard);
+                        if (foundCard) {
+                            cardsCache.push(foundCard);
+                        } else {
+                            console.error(
+                                `Card not found: ${activity.cardId}. Removing link. ${err}`,
+                                activity,
+                                cardsCache,
+                            );
+                            updateStoredItem(activity.id, () => ({
+                                cardId: null,
+                            }));
+                        }
                     })
                     .catch((err) => {
                         console.error(
-                            `Card not found: ${activity.cardId}. Removing link. ${err}`,
+                            `Error getting card: ${activity.cardId}. Removing link. ${err}`,
                             activity,
                             cardsCache,
                         );
