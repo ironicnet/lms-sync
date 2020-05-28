@@ -5,16 +5,15 @@
 // @description  Sync LMS with Trello and add status to tasks
 // @author       Ezequiel Calderara
 // @match        https://*.santillanacompartir.com/student-new/schoolclasses/*
-// @downloadURL  https://raw.githubusercontent.com/ironicnet/lms-sync/master/userscript.js
-// @updateURL    https://raw.githubusercontent.com/ironicnet/lms-sync/master/userscript.js
+// @downloadURL  https://github.com/ironicnet/lms-sync/blob/master/userscript.js
+// @updateURL    https://github.com/ironicnet/lms-sync/blob/master/userscript.js
 // @grant        none
 // ==/UserScript==
-
 class TrelloAPI {
-    trelloApiEndpoint = 'https://api.trello.com/1/';
     constructor(auth) {
         this.auth = auth;
         this.authParams = `key=${auth.key}&token=${auth.token}`;
+        this.endpoint = 'https://api.trello.com/1/';
     }
     getBoard(id) {
         const request = {
@@ -74,14 +73,14 @@ class TrelloAPI {
             .then((response) => response.json())
             .then(
                 (text) =>
-                    console.log('getBoard response', {
+                    console.log('getBoardLists response', {
                         request,
                         response: text,
                     }) || text,
             )
             .catch((err) => console.error(err));
     }
-    getCards(boardId, fields = 'id,name,desc,idList') {
+    getCards(boardId, fields = 'id,name,desc,idList,due') {
         var params = `${fields ? `fields=${fields}` : ''}`;
         var request = {
             method: 'GET',
@@ -100,7 +99,7 @@ class TrelloAPI {
             )
             .catch((err) => console.error(err));
     }
-    getCard(cardId, boardId, fields = 'id,name,desc,idList') {
+    getCard(cardId, boardId, fields = 'id,name,desc,idList,due') {
         var params = `${fields ? `fields=${fields}` : ''}`;
         var request = {
             method: 'GET',
@@ -212,6 +211,7 @@ class TrelloAPI {
             [STATUS.DELIVERED]: '#e2e2e2',
         },
         REFRESH_INTERVAL: 2500,
+        timezone: 0,
     };
     const lists = {
         todoList: null,
@@ -220,19 +220,26 @@ class TrelloAPI {
         deliveredList: null,
     };
     var cardsCache = [];
-    var verifyConfig = () => {
-        var storedConfig = {};
+    var getConfig = () => {
         var configText = localStorage.getItem('config');
-        if (configText) storedConfig = JSON.parse(configText);
+        if (configText) return JSON.parse(configText);
+        return {};
+    };
+    var setConfig = (config) =>
+        localStorage.setItem('config', JSON.stringify(config));
+    var verifyConfig = () => {
+        var storedConfig = getConfig();
 
         var isConfigValid = false;
         var authValid = storedConfig.key && storedConfig.token;
         if (!authValid) {
-            if (!storedConfig.key)
+            if (!storedConfig.key) {
                 storedConfig.key = prompt('Please enter your api key');
-            if (!storedConfig.token)
+            }
+            if (!storedConfig.token) {
                 storedConfig.token = prompt('Please enter your api token');
-            localStorage.setItem('config', JSON.stringify(storedConfig));
+            }
+            setConfig(storedConfig);
             authValid = storedConfig.key && storedConfig.token;
         }
         if (authValid) {
@@ -241,19 +248,31 @@ class TrelloAPI {
         if (authValid && !storedConfig.boardId) {
             trelloAPI.getBoards().then((boards) => {
                 var text = boards
-                    .map((board, index) => `${index+1}) ${board.name}: ${board.id}`)
+                    .map(
+                        (board, index) =>
+                            `${index + 1}) ${board.name}: ${board.id}`,
+                    )
                     .join('\r\n');
                 var indexString = prompt(
-                    'Please enter the board you want. Boards availables: ' + text,
-                    'Enter the index number: 1, 2, 3, etc...'
+                    'Please enter the board you want. Boards availables: ' +
+                        text,
+                    'Enter the index number: 1, 2, 3, etc...',
                 );
-                var index = parseInt(indexString)-1;
+                var index = parseInt(indexString) - 1;
                 if (boards[index]) {
                     storedConfig.boardId = boards[index].id;
-                    localStorage.setItem('config', JSON.stringify(storedConfig));
+                    localStorage.setItem(
+                        'config',
+                        JSON.stringify(storedConfig),
+                    );
                     location.reload();
                 } else {
-                    console.error('invalid boardid', indexString, index, boards);
+                    console.error(
+                        'invalid boardid',
+                        indexString,
+                        index,
+                        boards,
+                    );
                     alert('Invalid board selection');
                 }
             });
@@ -324,6 +343,20 @@ class TrelloAPI {
         var el = document.querySelector(selector);
         return el ? el.innerText.trim() : null;
     };
+    var dateStringToDate = (dateString, timezone = 0) => {
+        var dateParts = dateString.split(' - ');
+        var date = dateParts[0].split('/').reverse();
+        var time = dateParts[1].split(':');
+        var dateTime = new Date(
+            date[0],
+            parseInt(date[1], 10) - 1,
+            date[2],
+            parseInt(time[0], 10) + timezone * -1,
+            time[1],
+        );
+        return dateTime;
+    };
+    var isActivityDetailView =  () => urlIdPattern.exec(location.href);
     var activityInDetailView = () => {
         var matches = urlIdPattern.exec(location.href);
         var id = matches && matches[1];
@@ -333,6 +366,22 @@ class TrelloAPI {
             );
             var description = getElText('.activity-kids-description');
             var title = getElText('.crumb-last-apart');
+            document.title = `${title}`;
+            var dates = document.querySelectorAll(
+                '.activity-header__dates p.activity-header__date span.date--value',
+            );
+            var start = null;
+            var due = null;
+            if (dates.length > 1) {
+                start = dateStringToDate(
+                    dates[0].innerText.trim(),
+                    config.timezone,
+                ).toISOString();
+                due = dateStringToDate(
+                    dates[1].innerText.trim(),
+                    config.timezone,
+                ).toISOString();
+            }
 
             return {
                 id,
@@ -342,6 +391,8 @@ class TrelloAPI {
                 cardId: null,
                 container,
                 type: 'detail',
+                start,
+                due,
             };
         } else {
             return null;
@@ -357,6 +408,8 @@ class TrelloAPI {
                           description:
                               activity.description || stored.description,
                           cardId: activity.cardId || stored.cardId,
+                          due: activity.due || stored.due,
+                          start: activity.start || stored.start,
                       }
                     : activity,
             );
@@ -389,37 +442,26 @@ class TrelloAPI {
             .filter((item) => storedIdPattern.exec(item))
             .map(getLocalActivity);
     };
+    var getCardFromCache = (cardId) =>
+        cardsCache.find((cachedCard) => cardId === cachedCard.id);
     var getLocalActivity = (id) => {
         var activity = JSON.parse(localStorage.getItem(id));
         if (activity && activity.cardId) {
-            var card = cardsCache.find(
-                (cachedCard) => activity.cardId === cachedCard.id,
-            );
+            var card = getCardFromCache(activity.cardId);
             if (!card) {
                 console.error(
-                    `Card not found: ${activity.cardId}`,
+                    `Card not found in cache: ${activity.cardId}`,
                     activity,
                     cardsCache,
                 );
                 trelloAPI
                     .getCard(activity.cardId)
                     .then((foundCard) => {
-                        if (foundCard) {
-                            cardsCache.push(foundCard);
-                        } else {
-                            console.error(
-                                `Card not found: ${activity.cardId}. Removing link. ${err}`,
-                                activity,
-                                cardsCache,
-                            );
-                            updateStoredItem(activity.id, () => ({
-                                cardId: null,
-                            }));
-                        }
+                        cardsCache.push(foundCard);
                     })
                     .catch((err) => {
                         console.error(
-                            `Error getting card: ${activity.cardId}. Removing link. ${err}`,
+                            `Card not found: ${activity.cardId}. Removing link. ${err}`,
                             activity,
                             cardsCache,
                         );
@@ -444,7 +486,9 @@ class TrelloAPI {
                 );
                 if (card) {
                     activity.cardId = card.id;
-
+                    console.log(
+                        `Linking activity ${activity.id} to card ${cardId}. Matching title: ${activity.title} === ${card.name}`,
+                    );
                     updateStoredItem(activity.id, () => ({
                         cardId: card.id,
                     }));
@@ -470,6 +514,7 @@ ${activity.description}`;
                             pos: 'bottom',
                             desc: generateActivityDescription(activity),
                             idList: lists.todoList.id,
+                            due: activity.due,
                         })
                         .then((card) => {
                             activity.cardId = card.id;
@@ -483,28 +528,50 @@ ${activity.description}`;
             }
         });
     };
+    const diff = (diffMe, diffBy) => diffMe.split(diffBy).join('');
 
     function updateCardDescription(activity) {
         const description = generateActivityDescription(activity);
-        return trelloAPI
-            .getCard(activity.cardId, config.boardId, '')
-            .then((card) => {
-                var titleChanged = card.name !== activity.title;
-                var descriptionChanged = card.desc !== description;
-                if (titleChanged || descriptionChanged) {
-                    trelloAPI
-                        .updateCard({
-                            ...card,
+        return new Promise((resolve) => {
+            var card = getCardFromCache(activity.cardId);
+            var titleChanged = card.name !== activity.title;
+            var descriptionChanged = card.desc !== description;
+            var dueDateChanged = card.due != activity.due;
+            if (titleChanged || descriptionChanged || dueDateChanged) {
+                console.log('Updating card', {
+                    titleChanged,
+                    descriptionChanged,
+                    dueDateChanged,
+                    card,
+                    activity,
+                    changes: {
+                        old: {
+                            name: card.name,
+                            desc: card.desc,
+                            due: card.due,
+                        },
+                        new: {
                             name: activity.title,
                             desc: description,
-                        })
-                        .then((updatedCard) => {
-                            return { card: updatedCard, activity };
-                        });
-                } else {
-                    return { card, activity };
-                }
-            });
+                            due: activity.due,
+                        },
+                        descDiff: diff(card.desc, description),
+                    },
+                });
+                trelloAPI
+                    .updateCard({
+                        ...card,
+                        name: activity.title,
+                        desc: description,
+                        due: activity.due,
+                    })
+                    .then((updatedCard) => {
+                        resolve({ card: updatedCard, activity });
+                    });
+            } else {
+                resolve({ card, activity });
+            }
+        });
     }
     var getStatus = (activity) => {
         switch (activity && activity.card && activity.card.idList) {
@@ -550,22 +617,38 @@ ${activity.description}`;
         });
     };
 
+    var refreshActivities = () => {
+        var currentActivities = tryParseActivities();
+
+        mapNewActivitiesToCards();
+
+        if (currentActivities) {
+            updateActivitiesRender(
+                currentActivities.filter((activity) => activity.container),
+            );
+        }
+        var seeMore = document.querySelector("#seeMore");
+        if (isActivityDetailView() || seeMore && seeMore.getAttribute("data-is-see-more") === "false") {
+            window.stopRefresh();
+        }
+    };
     verifyConfig().then(() => {
         var currentActivities = tryParseActivities();
         mapNewActivitiesToCards();
         updateActivitiesDescriptions();
 
         window.activitiesInterval = setInterval(() => {
-            currentActivities = tryParseActivities();
-
-            mapNewActivitiesToCards();
-
-            if (currentActivities)
-                updateActivitiesRender(
-                    currentActivities.filter((activity) => activity.container),
-                );
+            refreshActivities();
         }, config.REFRESH_INTERVAL);
 
         window.stopRefresh = () => clearInterval(window.activitiesInterval);
+        window.helpers = {
+            getLocalActivities,
+            getLocalActivity,
+            getCardFromCache,
+            updateStoredItem,
+            getConfig,
+            setConfig,
+        };
     });
 })();
