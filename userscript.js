@@ -356,7 +356,7 @@ class TrelloAPI {
         );
         return dateTime;
     };
-    var isActivityDetailView =  () => urlIdPattern.exec(location.href);
+    var isActivityDetailView = () => urlIdPattern.exec(location.href);
     var activityInDetailView = () => {
         var matches = urlIdPattern.exec(location.href);
         var id = matches && matches[1];
@@ -627,8 +627,11 @@ ${activity.description}`;
                 currentActivities.filter((activity) => activity.container),
             );
         }
-        var seeMore = document.querySelector("#seeMore");
-        if (isActivityDetailView() || seeMore && seeMore.getAttribute("data-is-see-more") === "false") {
+        var seeMore = document.querySelector('#seeMore');
+        if (
+            isActivityDetailView() ||
+            (seeMore && seeMore.getAttribute('data-is-see-more') === 'false')
+        ) {
             window.stopRefresh();
         }
     };
